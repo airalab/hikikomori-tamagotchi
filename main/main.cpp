@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 // #include "ha/esp_zigbee_ha_standard.h"
 #include "web_server.h"
@@ -40,6 +41,10 @@ static const char *TAG = "ESP_ZB_ON_OFF_LIGHT";
 Robonomics robonomics;
 int lcd_brightness = 30;
 uint16_t buttonPressCount = 0;
+int work_timeout = 5 * 60 * 1000000; // 5 min
+
+esp_timer_handle_t sleep_mode_timer;
+
 
 static void send_datalog_counter() {
     char message[50]; // Buffer to hold the resulting string
@@ -115,6 +120,7 @@ static void battery_task(void *pvParameters) {
         battery_level = getBatteryState();
         ESP_LOGI(TAG, "Battery: %d", battery_level);
         set_lcd_battery(&battery_level);
+        esp_timer_get_time();
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
@@ -133,6 +139,7 @@ void setup_button() {
 }
 
 void button_short_pressed_handle() {
+    reset_sleep_timer();
     buttonPressCount++;
     if (!is_current_screen_main()) {
         set_main_screen();
@@ -140,10 +147,24 @@ void button_short_pressed_handle() {
     set_lcd_counter(&buttonPressCount);
 }
 
+void go_to_sleep_mode() {
+    ESP_LOGI(TAG, "Go to sleep mode");
+    RGB_turn_off();
+    lcd_brightness = 0;
+    set_brightness(lcd_brightness);
+    esp_deep_sleep_start();
+}
+
+void handle_sleep_timer(void* arg) {
+    go_to_sleep_mode();
+}
+
 void button_long_pressed_handle() {
+    stop_sleep_timer();
     set_sending_datalog_screen();
     send_datalog_counter();
     vTaskDelay(pdMS_TO_TICKS(1000));
+    start_sleep_timer();
 }
 
 
@@ -158,6 +179,7 @@ void button_task(void *pvParameters) {
     int button_level_prev = 1;
     int button_pressed_count = 0;
     bool button_handled = false;
+    int short_press_count = 0;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
         button_level = gpio_get_level(BUTTON_GPIO);
@@ -165,18 +187,48 @@ void button_task(void *pvParameters) {
             button_pressed_count++;
             if (button_pressed_count > 200) {
                 ESP_LOGI(TAG, "Send Datalog");
+                short_press_count = 0;
                 button_long_pressed_handle();
                 button_pressed_count = 0;
             }
         } else if (button_level_prev == 0) {
             if (button_pressed_count > 15) {
+                short_press_count = 0;
                 button_short_pressed_handle();
+            } else if (button_pressed_count > 3) {
+                short_press_count++;
+            } else {
+                short_press_count = 0;
+            }
+            if (short_press_count > 1) {
+                go_to_sleep_mode();
             }
             button_handled = false;
             button_pressed_count = 0;
         }
         button_level_prev = button_level;
     }
+}
+
+void reset_sleep_timer() {
+    esp_timer_restart(sleep_mode_timer, work_timeout);
+}
+
+void stop_sleep_timer() {
+    esp_timer_stop(sleep_mode_timer);
+}
+
+void start_sleep_timer() {
+    ESP_ERROR_CHECK(esp_timer_start_once(sleep_mode_timer, work_timeout));
+}
+
+void setup_sleep_mode_timer() {
+    const esp_timer_create_args_t sleep_mode_timer_args = {
+            .callback = &handle_sleep_timer,
+            .name = "sleep-mode-timer"
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&sleep_mode_timer_args, &sleep_mode_timer));
+    start_sleep_timer();
 }
 
 extern "C" void app_main(void)
@@ -201,6 +253,8 @@ extern "C" void app_main(void)
     xTaskCreate(lcd_task, "LCD_task", 4096, NULL, 5, NULL);
     xTaskCreate(button_task, "Button_Task", 16384, NULL, 6, NULL);
     xTaskCreate(battery_task, "Battery_Task", 2048, NULL, 7, NULL);
+    setup_sleep_mode_timer();
     get_wifi_creds();
+    reset_sleep_timer();
     set_main_screen();
 }
