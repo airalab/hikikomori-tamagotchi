@@ -57,6 +57,9 @@ The Hikikomory device can count button presses and send Datalog transactions wit
 
    <img src="./images/hiki3.jpg" alt="hiki3" width="300"/>
 
+3. **Turn Off the Device**
+   To put the device into deep sleep mode, quickly double-press the left button. To turn it back on, simply press the right button.
+
 ## Manual Build
 
 ### Requirements
