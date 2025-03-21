@@ -1,0 +1,9 @@
+## IDF Component Manager Manifest File
+dependencies:
+  # espressif/arduino-esp32: "*"
+  # espressif/esp-zboss-lib: "~1.5.0"
+  # espressif/esp-zigbee-lib: "~1.5.0"
+  # espressif/mbedTLS: "*"
+  ## Required IDF version
+  idf:
+    version: ">=5.1.0"
